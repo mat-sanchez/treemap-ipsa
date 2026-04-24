@@ -740,23 +740,38 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   }
   #linkedin-link:hover { color: var(--blue); }
 
+  /* Desktop: date-row es invisible — sus hijos participan directamente en el flex del padre */
+  .date-row { display: contents; }
+
   /* Mobile */
   @media (max-width: 640px) {
     body { height: auto; overflow-y: auto; min-height: 100dvh; }
-    #chart-container { height: 60vw; min-height: 280px; flex: none; }
+    #chart-container { height: 75vw; min-height: 380px; flex: none; }
 
     #header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
     .logo-text .subtitle { display: none; }
     .adj-toggle-wrap { margin-left: auto; order: 2; }
     .adj-toggle-lbl  { display: none; }
 
-    #date-filter { padding: 7px 14px; gap: 5px; }
+    /* Barra de filtros: fila 1 = presets de período, fila 2 = fechas + acción */
+    #date-filter {
+      padding: 8px 14px;
+      gap: 6px;
+      flex-direction: column;
+      align-items: stretch;
+      flex-wrap: nowrap;
+    }
     .filter-divider { display: none; }
-    .period-btn { padding: 5px 9px; font-size: 9px; }
-    .date-chip { font-size: 10px; padding: 5px 7px; }
-    #btn-update   { font-size: 9px; padding: 5px 10px; }
-    #btn-download { font-size: 9px; padding: 5px 10px; }
-    #filter-status { display: none; }
+    .period-group   { width: 100%; }
+    .period-btn     { flex: 1; text-align: center; padding: 7px 4px; font-size: 10px; }
+    .date-row       { display: flex; align-items: center; gap: 6px; }
+    .date-chip      { flex: 1; min-width: 0; font-size: 10px; padding: 6px 7px; }
+    #btn-update     { flex-shrink: 0; font-size: 9px; padding: 6px 10px; white-space: nowrap; }
+    #btn-download   { display: none; }
+    #filter-status  { display: none; }
+
+    /* Tooltip acotado al ancho de pantalla */
+    #tooltip { min-width: 0; width: 210px; padding: 12px 14px; }
 
     #legend { padding: 7px 14px; flex-wrap: wrap; gap: 8px; }
     #movers-bar   { display: none; }
@@ -799,23 +814,25 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
   <div class="filter-divider"></div>
 
-  <input type="date" id="date-start" class="date-chip"
-         value="DEFAULT_START"
-         min="DATE_MIN_PLACEHOLDER"
-         max="DATE_MAX_PLACEHOLDER"
-         title="Fecha de inicio">
+  <div class="date-row">
+    <input type="date" id="date-start" class="date-chip"
+           value="DEFAULT_START"
+           min="DATE_MIN_PLACEHOLDER"
+           max="DATE_MAX_PLACEHOLDER"
+           title="Fecha de inicio">
 
-  <span class="filter-arrow">→</span>
+    <span class="filter-arrow">→</span>
 
-  <input type="date" id="date-end" class="date-chip"
-         value="DEFAULT_END"
-         min="DATE_MIN_PLACEHOLDER"
-         max="DATE_MAX_PLACEHOLDER"
-         title="Fecha de término">
+    <input type="date" id="date-end" class="date-chip"
+           value="DEFAULT_END"
+           min="DATE_MIN_PLACEHOLDER"
+           max="DATE_MAX_PLACEHOLDER"
+           title="Fecha de término">
 
-  <button id="btn-update" onclick="freshUpdate()">↓ Actualizar datos</button>
-  <span id="filter-status"></span>
-  <button id="btn-download" onclick="downloadPNG()" title="Descargar imagen PNG">⬇ PNG</button>
+    <button id="btn-update" onclick="freshUpdate()">↓ Actualizar datos</button>
+    <span id="filter-status"></span>
+    <button id="btn-download" onclick="downloadPNG()" title="Descargar imagen PNG">⬇ PNG</button>
+  </div>
 </div>
 
 <!-- ── Barra de progreso (visible solo durante "Actualizar") ── -->
@@ -876,6 +893,9 @@ let currentData = null;
 
 // useAdjusted: si true usa adjPrices en lugar de prices para calcular pct
 let useAdjusted = false;
+
+// Celda activa en touch (para toggle: primer tap muestra, segundo tap oculta)
+let _touchCell = null;
 
 // Rango de fechas activo; usado por downloadPNG para el nombre del archivo
 let _activeDateRange = { start: defaultStart, end: defaultEnd };
@@ -1187,7 +1207,8 @@ function render(data) {
     .attr("height", d => Math.max(0, d.y1 - d.y0 - 2))
     .attr("fill", d => discreteColor(d.data.pct))
     .attr("rx", 5)
-    .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+    .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave)
+    .on("touchstart", onTouchStart);
 
   // 2. Sombra inferior (gradient overlay, no recibe eventos de mouse)
   cells.append("rect")
@@ -1296,11 +1317,11 @@ function onMouseMove(event, d) {
     tipRow("Variación",  `${sign}${d.data.pct.toFixed(2)}%`, pctCls),
   );
 
-  const pad = 16, tw = 220, th = 160;
+  const pad = 12, tw = 220, th = 170;
   let tx = event.clientX + pad;
   let ty = event.clientY - pad;
-  if (tx + tw > window.innerWidth)  tx = event.clientX - tw - pad;
-  if (ty + th > window.innerHeight) ty = event.clientY - th - pad;
+  tx = Math.max(pad, Math.min(tx, window.innerWidth  - tw - pad));
+  ty = Math.max(pad, Math.min(ty, window.innerHeight - th - pad));
   tooltip.style.left = tx + "px";
   tooltip.style.top  = ty + "px";
   tooltip.classList.add("visible");
@@ -1308,6 +1329,17 @@ function onMouseMove(event, d) {
 
 function onMouseLeave() {
   tooltip.classList.remove("visible");
+}
+
+function onTouchStart(event, d) {
+  if (_touchCell === d) {
+    onMouseLeave();
+    _touchCell = null;
+    return;
+  }
+  _touchCell = d;
+  const t = event.touches[0];
+  onMouseMove({ clientX: t.clientX, clientY: t.clientY }, d);
 }
 
 
@@ -1355,6 +1387,12 @@ window.addEventListener("resize", () => {
   clearTimeout(window._rt);
   window._rt = setTimeout(() => render(currentData), 80);
 });
+
+// Ocultar tooltip al tocar fuera de una celda o al hacer scroll
+document.addEventListener("touchstart", e => {
+  if (!e.target.closest(".cell")) { onMouseLeave(); _touchCell = null; }
+}, { passive: true });
+window.addEventListener("scroll", () => { onMouseLeave(); _touchCell = null; }, { passive: true });
 </script>
 </body>
 </html>
