@@ -26,6 +26,7 @@ import threading
 import urllib.parse
 import http.server
 import socketserver
+import time
 
 # Forzar UTF-8 en consola Windows para evitar errores con tildes y ñ
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -231,7 +232,8 @@ def refresh_and_build_json() -> str:
 
     close, adj_close = download_prices(r_start, r_end)
     tree = build_hierarchy(close, adj_close, ref_start, t_today.strftime("%Y-%m-%d"))
-    return json.dumps(tree, ensure_ascii=False)
+    # Escapar </ para que el JSON pueda embeberse en <script> sin riesgo de break-out
+    return json.dumps(tree, ensure_ascii=False).replace("</", r"<\/")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -270,7 +272,7 @@ date_max = today.strftime("%Y-%m-%d")   # fecha máxima = hoy
 # Construir árbol D3 con datos iniciales (vista de última semana)
 print("  Construyendo jerarquía inicial ...")
 d3_tree   = build_hierarchy(close_full, adj_close_full, default_start, default_end)
-data_json = json.dumps(d3_tree, ensure_ascii=False)
+data_json = json.dumps(d3_tree, ensure_ascii=False).replace("</", r"<\/")
 
 total_init = sum(len(s["children"]) for s in d3_tree["children"])
 print(f"  {total_init}/{len(IPSA)} tickers incluidos en el rango inicial\n")
@@ -296,294 +298,451 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IPSA Treemap</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@300;400;500&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
-  /* Reset: modelo de caja predecible en todos los elementos */
+  :root {
+    --bg:      #08090a;
+    --surface: #0f1012;
+    --card:    #13151a;
+    --border:  #1e2128;
+    --border2: #2a2d36;
+    --accent:  #c8ff4a;
+    --blue:    #47d4ff;
+    --text:    #dde2ea;
+    --muted:   #5a6070;
+    --dim:     #3a3f50;
+  }
+
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  /* Layout de columna vertical que ocupa toda la pantalla sin scroll */
   body {
-    background: #0d1117;
-    color: #e6edf3;
+    background: var(--bg);
+    color: var(--text);
     font-family: 'Inter', sans-serif;
+    font-weight: 300;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
-  /* ── Header ─────────────────────────────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.25;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #header, #date-filter, #progress-bar-wrap, #chart-container, #legend {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
   #header {
-    padding: 14px 24px;
-    border-bottom: 1px solid #1e2533;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    flex-shrink: 0;
-    background: linear-gradient(to bottom, #111827, #0d1117);
-  }
-  #header h1          { font-size: 17px; font-weight: 800; letter-spacing: -0.4px; color: #f0f6fc; }
-  #header .dot        { color: #3d4f6e; }
-  #header .subtitle   { font-size: 12px; color: #4a5568; font-weight: 400; }
-
-  /* Badge que muestra el período activo; JS lo actualiza al cambiar fechas */
-  .badge {
-    margin-left: auto;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    padding: 3px 10px;
-    border-radius: 20px;
-    border: 1px solid #2d3748;
-    color: #7c8fa6;
-    background: #111827;
-    white-space: nowrap;
-  }
-
-  /* ── Panel de filtro de fechas ────────────────────────────────────────── */
-  /* Barra entre el header y el treemap con los controles de rango */
-  #date-filter {
+    padding: 11px 20px;
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 9px 24px;
-    background: #0f1621;
-    border-bottom: 1px solid #1e2533;
     flex-shrink: 0;
-    flex-wrap: wrap;
+    background: linear-gradient(to bottom, var(--surface), var(--bg));
   }
 
-  /* Etiqueta "Período" a la izquierda */
-  #filter-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: #4a5568;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
+  #header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  #header .dot    { color: var(--border2); font-size: 16px; }
+  #header .subtitle {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 300;
+  }
+
+  .badge {
+    margin-left: auto;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.08em;
+    padding: 4px 12px;
+    border-radius: 2px;
+    border: 1px solid var(--border2);
+    color: var(--muted);
+    background: var(--card);
     white-space: nowrap;
   }
 
-  /* Inputs de fecha con estilo de chip/etiqueta redondeada */
-  .date-chip {
-    background: #161b22;
-    border: 1px solid #2d3748;
-    border-radius: 20px;
-    color: #c9d1d9;
-    font-family: 'Inter', sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 5px 14px;
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-    outline: none;
-    color-scheme: dark;   /* activa el tema oscuro en el date picker nativo del navegador */
-  }
-  .date-chip:hover { border-color: #4a5568; background: #1a2030; }
-  .date-chip:focus { border-color: #58a6ff; background: #1a2030; }
-
-  /* Separador visual entre los dos date pickers */
-  .filter-arrow { color: #3d4f6e; font-size: 14px; user-select: none; }
-
-  /* Botón principal "Actualizar" — descarga datos frescos de yfinance */
-  #btn-update {
-    background: #1f3a5c;
-    border: 1px solid #2a5298;
-    border-radius: 20px;
-    color: #79b8ff;
-    font-family: 'Inter', sans-serif;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 5px 16px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
-    white-space: nowrap;
-  }
-  #btn-update:hover      { background: #2a4d7a; border-color: #58a6ff; }
-  #btn-update:active     { background: #1a3050; }
-  #btn-update:disabled   { opacity: 0.45; cursor: not-allowed; }
-
-  /* Botón secundario "Filtrar" — recalculo local sin red */
-  #btn-local {
-    background: transparent;
-    border: 1px solid #2d3748;
-    border-radius: 20px;
-    color: #4a5568;
-    font-family: 'Inter', sans-serif;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 5px 14px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    transition: border-color 0.15s, color 0.15s;
-    white-space: nowrap;
-  }
-  #btn-local:hover { border-color: #4a5568; color: #7c8fa6; }
-
-  /* Botón de descarga PNG */
-  #btn-download {
-    background: transparent;
-    border: 1px solid #2d3748;
-    border-radius: 20px;
-    color: #4a5568;
-    font-family: 'Inter', sans-serif;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 5px 14px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    transition: border-color 0.15s, color 0.15s;
-    white-space: nowrap;
-  }
-  #btn-download:hover    { border-color: #4a5568; color: #7c8fa6; }
-  #btn-download:disabled { opacity: 0.45; cursor: not-allowed; }
-
-  /* ── Toggle nominal / ajustado por dividendos ───────────────────────────── */
+  /* Toggle nominal / ajustado */
   .adj-toggle-wrap {
     display: flex;
     align-items: center;
     gap: 7px;
     cursor: pointer;
     user-select: none;
-    margin-left: 16px;
+    margin-left: 10px;
   }
+
   .adj-toggle-lbl {
-    font-size: 11px;
-    color: #3a4a5a;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--dim);
     white-space: nowrap;
     transition: color 0.2s;
+    text-transform: uppercase;
   }
-  .adj-toggle-lbl.on { color: #c8d8e8; }
+
+  .adj-toggle-lbl.on { color: var(--text); }
+
   #adj-toggle {
     position: relative;
-    width: 48px;
-    height: 26px;
-    background: #0d1117;
-    border: 1px solid #2d3748;
+    width: 44px;
+    height: 24px;
+    background: var(--card);
+    border: 1px solid var(--border2);
     border-radius: 999px;
     flex-shrink: 0;
     transition: border-color 0.25s;
   }
-  #adj-toggle:hover { border-color: #4a5568; }
-  #adj-toggle.active { border-color: #7c5cbf; }
+
+  #adj-toggle:hover  { border-color: var(--muted); }
+  #adj-toggle.active { border-color: var(--accent); }
+
   .toggle-knob {
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #4facfe 0%, #a78bfa 45%, #f472b6 100%);
-    box-shadow: 0 0 7px rgba(167, 139, 250, 0.55);
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--muted);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), background 0.25s;
   }
-  #adj-toggle.active .toggle-knob { transform: translateX(22px); }
 
-  /* Mensaje de estado debajo del filtro (loading / ok / error) */
-  #filter-status {
-    font-size: 11px;
-    color: #4a5568;
-    font-style: italic;
-    transition: color 0.25s;
-    min-width: 120px;
+  #adj-toggle.active .toggle-knob {
+    transform: translateX(20px);
+    background: var(--accent);
   }
-  #filter-status.loading { color: #58a6ff; }
-  #filter-status.ok      { color: #3fb950; }
+
+  /* Panel de filtro */
+  #date-filter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  #filter-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    white-space: nowrap;
+  }
+
+  .date-chip {
+    background: var(--card);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    font-weight: 400;
+    padding: 5px 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    outline: none;
+    color-scheme: dark;
+  }
+
+  .date-chip:hover { border-color: var(--muted); }
+  .date-chip:focus { border-color: var(--accent); }
+
+  .filter-arrow {
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--dim);
+    font-size: 12px;
+    user-select: none;
+  }
+
+  #btn-update {
+    background: rgba(200,255,74,0.07);
+    border: 1px solid rgba(200,255,74,0.22);
+    border-radius: 3px;
+    color: var(--accent);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    padding: 5px 14px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  #btn-update:hover    { background: rgba(200,255,74,0.14); border-color: var(--accent); }
+  #btn-update:active   { background: rgba(200,255,74,0.04); }
+  #btn-update:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  #btn-local {
+    background: transparent;
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    padding: 5px 14px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  #btn-local:hover { border-color: var(--muted); color: var(--text); }
+
+  #btn-download {
+    background: transparent;
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    padding: 5px 14px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  #btn-download:hover    { border-color: var(--muted); color: var(--text); }
+  #btn-download:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  #filter-status {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    transition: color 0.25s;
+    min-width: 100px;
+  }
+
+  #filter-status.loading { color: var(--blue); }
+  #filter-status.ok      { color: var(--accent); }
   #filter-status.error   { color: #f85149; }
 
-  /* ── Barra de progreso (visible solo durante descarga de /refresh) ──────── */
-  /* Ocupa 3px de alto; se muestra/oculta por JS con display block/none */
+  /* Barra de progreso */
   #progress-bar-wrap {
-    height: 3px;
-    background: #1e2533;
+    height: 2px;
+    background: var(--border);
     flex-shrink: 0;
     display: none;
     overflow: hidden;
   }
-  /* Animación deslizante infinita mientras dura la descarga */
+
   #progress-bar-fill {
     height: 100%;
     width: 40%;
-    background: linear-gradient(90deg, #1f3a5c, #58a6ff, #1f3a5c);
-    background-size: 200% 100%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
     animation: progress-slide 1.4s infinite linear;
   }
+
   @keyframes progress-slide {
     0%   { margin-left: -40%; }
     100% { margin-left: 100%; }
   }
 
-  /* ── Área del treemap ─────────────────────────────────────────────────── */
-  /* flex:1 hace que tome todo el espacio vertical disponible */
-  #chart-container { flex: 1; position: relative; overflow: hidden; }
+  /* Treemap */
+  #chart-container { flex: 1; position: relative; overflow: hidden; min-height: 0; }
   svg { width: 100%; height: 100%; display: block; }
 
-  /* ── Texto dentro del SVG ─────────────────────────────────────────────── */
-  /* Etiqueta del sector en la esquina superior de cada grupo */
   .industry-label {
-    font-family: 'Inter', sans-serif;
-    font-size: 9px; font-weight: 700;
-    fill: rgba(230,237,243,0.55);
-    text-transform: uppercase; letter-spacing: 0.9px;
-    pointer-events: none;   /* no intercepta eventos de mouse */
-  }
-  /* Nombre del ticker dentro de cada celda */
-  .ticker-name {
-    font-family: 'Inter', sans-serif; font-weight: 800;
-    fill: rgba(255,255,255,0.95);
-    pointer-events: none; text-anchor: middle; dominant-baseline: middle;
-  }
-  /* Variación % debajo del nombre del ticker */
-  .ticker-pct {
-    font-family: 'Inter', sans-serif; font-weight: 500;
-    fill: rgba(255,255,255,0.75);
-    pointer-events: none; text-anchor: middle; dominant-baseline: middle;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    font-weight: 400;
+    fill: rgba(90,96,112,0.65);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    pointer-events: none;
   }
 
-  /* ── Tooltip ──────────────────────────────────────────────────────────── */
-  /* Aparece al hacer hover sobre una celda; z-index alto para ir sobre el SVG */
+  .ticker-name {
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 0.06em;
+    fill: rgba(255,255,255,0.92);
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+
+  .ticker-pct {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 300;
+    fill: rgba(255,255,255,0.6);
+    pointer-events: none;
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+
+  /* Tooltip */
   #tooltip {
     position: fixed;
-    background: #161b22; border: 1px solid #2d3748;
-    border-radius: 10px; padding: 14px 18px;
-    font-size: 12px; pointer-events: none;
-    opacity: 0; transition: opacity 0.12s ease;
+    background: var(--card);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    padding: 14px 18px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.1s ease;
     min-width: 200px;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+    box-shadow: 0 20px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.03);
     z-index: 999;
   }
-  #tooltip.visible { opacity: 1; }
-  .tip-ticker { font-size: 16px; font-weight: 800; color: #f0f6fc; margin-bottom: 1px; }
-  .tip-name   { font-size: 10px; color: #5a6a7e; margin-bottom: 10px; font-weight: 400; }
-  .tip-sep    { height: 1px; background: #1e2533; margin-bottom: 8px; }
-  .tip-row    { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 5px; color: #4a5568; font-size: 11px; }
-  .tip-val    { color: #c9d1d9; font-weight: 600; font-size: 12px; }
-  .pos        { color: #3fb950 !important; }
-  .neg        { color: #f85149 !important; }
 
-  /* ── Leyenda inferior ────────────────────────────────────────────────── */
+  #tooltip.visible { opacity: 1; }
+
+  .tip-ticker {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 0.06em;
+    color: var(--text);
+    margin-bottom: 1px;
+    line-height: 1.1;
+  }
+
+  .tip-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+
+  .tip-sep { height: 1px; background: var(--border); margin-bottom: 8px; }
+
+  .tip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 5px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  .tip-val { color: var(--text); font-weight: 500; font-size: 11px; }
+  .pos     { color: #2ecc71 !important; }
+  .neg     { color: #e5383b !important; }
+
+  /* Leyenda */
   #legend {
-    padding: 8px 24px 10px; border-top: 1px solid #1e2533;
-    display: flex; align-items: center; gap: 12px;
-    flex-shrink: 0; background: #0d1117;
+    padding: 7px 20px 8px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    background: var(--surface);
   }
-  #legend-label { font-size: 10px; color: #4a5568; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; }
+
+  #legend-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
   #legend-wrap  { display: flex; flex-direction: column; gap: 3px; }
-  #legend-bar   { border-radius: 3px; }
-  #legend-ticks { display: flex; justify-content: space-between; font-size: 9px; color: #4a5568; font-weight: 600; }
-  #legend-right { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
-  #legend-date  { font-size: 10px; color: #3d4f6e; }
-  #linkedin-link {
-    font-size: 9px; color: #3d4f6e; text-decoration: none; font-weight: 600;
-    display: inline-flex; align-items: center; gap: 3px;
+  #legend-bar   { border-radius: 2px; }
+
+  #legend-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
   }
-  #linkedin-link:hover { color: #74b0e8; text-decoration: underline; }
+
+  #legend-right { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+
+  #legend-date {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+  }
+
+  #linkedin-link {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--dim);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: color 0.2s;
+  }
+
+  #linkedin-link:hover { color: var(--blue); }
+
+  /* Mobile */
+  @media (max-width: 640px) {
+    body { height: auto; overflow-y: auto; min-height: 100dvh; }
+
+    #chart-container { height: 56vw; min-height: 260px; flex: none; }
+
+    #header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
+    #header .subtitle { display: none; }
+    #header .dot      { display: none; }
+
+    .badge { margin-left: 0; order: 3; width: 100%; font-size: 9px; }
+    .adj-toggle-wrap { margin-left: auto; }
+    .adj-toggle-lbl  { display: none; }
+
+    #date-filter { padding: 7px 14px; gap: 6px; }
+    #filter-label { display: none; }
+    .date-chip { font-size: 10px; padding: 5px 8px; }
+
+    #btn-local, #btn-update, #btn-download { font-size: 9px; padding: 5px 10px; }
+    #filter-status { display: none; }
+
+    #legend { padding: 7px 14px; flex-wrap: wrap; }
+    #legend-right { margin-left: 0; width: 100%; }
+    #legend-date  { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -1073,15 +1232,28 @@ function onMouseMove(event, d) {
                : v >= 1e9  ? `$${(v/1e9).toFixed(2)} B`
                :              `$${(v/1e6).toFixed(0)} M`;
 
-  tooltip.innerHTML = `
-    <div class="tip-ticker">${d.data.name}</div>
-    <div class="tip-name">${d.data.fullName}</div>
-    <div class="tip-sep"></div>
-    <div class="tip-row"><span>Industria</span>  <span class="tip-val">${d.parent.data.name}</span></div>
-    <div class="tip-row"><span>Precio</span>     <span class="tip-val">$${Number(d.data.price).toLocaleString("es-CL",{minimumFractionDigits:2})}</span></div>
-    <div class="tip-row"><span>Market Cap</span> <span class="tip-val">${mcap}</span></div>
-    <div class="tip-row"><span>Variación</span>  <span class="tip-val ${pctCls}">${sign}${d.data.pct.toFixed(2)}%</span></div>
-  `;
+  // Construir tooltip via DOM (nunca innerHTML) para evitar XSS
+  function tipEl(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls)          e.className   = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function tipRow(label, value, cls) {
+    const r = tipEl("div", "tip-row");
+    r.appendChild(tipEl("span", null, label));
+    r.appendChild(tipEl("span", cls ? `tip-val ${cls}` : "tip-val", value));
+    return r;
+  }
+  tooltip.replaceChildren(
+    tipEl("div", "tip-ticker", d.data.name),
+    tipEl("div", "tip-name",   d.data.fullName),
+    tipEl("div", "tip-sep"),
+    tipRow("Industria",  d.parent.data.name),
+    tipRow("Precio",     `$${Number(d.data.price).toLocaleString("es-CL",{minimumFractionDigits:2})}`),
+    tipRow("Market Cap", mcap),
+    tipRow("Variación",  `${sign}${d.data.pct.toFixed(2)}%`, pctCls),
+  );
 
   // Posicionar evitando que el tooltip salga de la pantalla
   const pad = 16, tw = 220, th = 160;
@@ -1119,9 +1291,7 @@ async function downloadPNG() {
       backgroundColor: "#0d1117",
       scale: Math.max(window.devicePixelRatio * 2, 4),
       useCORS: true,
-      allowTaint: true,
       logging: false,
-      // Ignorar el tooltip (fixed, oculto) para evitar artefactos
       ignoreElements: el => el.id === "tooltip",
     });
 
@@ -1182,6 +1352,10 @@ def make_handler(html_bytes: bytes):
     Usamos una fábrica porque BaseHTTPRequestHandler no permite constructor custom
     sin sobreescribir __init__ (que tiene signatura fija).
     """
+    # Estado de rate limiting compartido entre hilos via closure
+    _state         = {"last_refresh": 0.0}
+    _refresh_lock  = threading.Lock()
+    _REFRESH_COOLDOWN = 60  # segundos mínimos entre actualizaciones
 
     class IPSAHandler(http.server.BaseHTTPRequestHandler):
 
@@ -1195,11 +1369,17 @@ def make_handler(html_bytes: bytes):
                 self._respond(200, "text/html; charset=utf-8", html_bytes)
 
             elif path == "/refresh":
-                # Endpoint llamado por el botón "Actualizar" del HTML.
-                # Descarga 13 meses completos de precios frescos desde Yahoo Finance
-                # y retorna el árbol D3 completo como JSON.
-                # El navegador reemplaza rawData.children con este resultado,
-                # actualizando el caché local para que el filtro local use data reciente.
+                # Rate limiting: máximo una descarga cada _REFRESH_COOLDOWN segundos
+                with _refresh_lock:
+                    now  = time.time()
+                    wait = _REFRESH_COOLDOWN - (now - _state["last_refresh"])
+                    if wait > 0:
+                        secs = int(wait) + 1
+                        err  = json.dumps({"error": f"Demasiadas solicitudes. Espera {secs}s."})
+                        self._respond(429, "application/json", err.encode())
+                        return
+                    _state["last_refresh"] = now
+
                 try:
                     print(f"  [/refresh] Descargando 13 meses frescos ...")
                     result = refresh_and_build_json()
@@ -1207,7 +1387,7 @@ def make_handler(html_bytes: bytes):
                     print(f"  [/refresh] OK — {len(result)//1024} KB retornados")
                 except Exception as exc:
                     print(f"  [/refresh] ERROR: {exc}")
-                    err = json.dumps({"error": str(exc)})
+                    err = json.dumps({"error": "Error al actualizar los datos. Intenta nuevamente."})
                     self._respond(500, "application/json", err.encode())
 
             elif path == "/favicon.ico":
@@ -1222,14 +1402,26 @@ def make_handler(html_bytes: bytes):
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            # Permitir que el HTML llame a /refresh desde el mismo origen
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+            self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+            if "text/html" in content_type:
+                self.send_header(
+                    "Content-Security-Policy",
+                    "default-src 'self'; "
+                    "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com 'unsafe-inline'; "
+                    "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
+                    "font-src https://fonts.gstatic.com; "
+                    "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; "
+                    "img-src 'self' data:; "
+                    "object-src 'none'; "
+                    "frame-ancestors 'none';"
+                )
             self.end_headers()
             self.wfile.write(body)
 
         def log_message(self, *_):
             # Suprimir los logs HTTP por defecto (muy verbosos)
-            # Solo mostramos los errores (no-200) de forma personalizada
             pass
 
     return IPSAHandler
@@ -1265,7 +1457,16 @@ HTML = HTML.replace("DATE_MAX_PLACEHOLDER", date_max)       # máximo del date p
 html_bytes = HTML.encode("utf-8")
 
 # Encontrar un puerto libre y levantar el servidor
-port    = int(os.environ.get("PORT", find_free_port(8765)))
+_port_env = os.environ.get("PORT")
+if _port_env is not None:
+    try:
+        port = int(_port_env)
+    except ValueError:
+        raise ValueError(f"PORT inválido: '{_port_env}'. Debe ser un número entero.")
+    if not (1 <= port <= 65535):
+        raise ValueError(f"PORT inválido: {port}. Debe estar entre 1 y 65535.")
+else:
+    port = find_free_port(8765)
 handler = make_handler(html_bytes)
 server  = ThreadingHTTPServer(("0.0.0.0", port), handler)
 
