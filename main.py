@@ -298,8 +298,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <title>IPSA Treemap</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"
+        integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i"
+        crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+        integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H"
+        crossorigin="anonymous"></script>
 <style>
   :root {
     --bg:      #080c12;
@@ -1547,7 +1551,8 @@ async function downloadPNG() {
     link.href     = canvas.toDataURL("image/png");
     link.click();
   } catch (err) {
-    alert("Error al generar PNG: " + err.message);
+    console.error("PNG error:", err);
+    alert("Error al generar PNG. Intenta nuevamente.");
   } finally {
     btn.disabled    = false;
     btn.textContent = "⬇ PNG";
@@ -1648,14 +1653,17 @@ def make_handler(html_bytes: bytes):
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "SAMEORIGIN")
             self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
             if "text/html" in content_type:
                 self.send_header(
                     "Content-Security-Policy",
                     "default-src 'self'; "
-                    "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com https://static.cloudflareinsights.com 'unsafe-inline'; "
+                    "script-src 'self' https://cdnjs.cloudflare.com https://static.cloudflareinsights.com 'unsafe-inline'; "
                     "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
                     "font-src https://fonts.gstatic.com; "
                     "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cloudflareinsights.com; "
@@ -1713,8 +1721,9 @@ if _port_env is not None:
         raise ValueError(f"PORT inválido: {port}. Debe estar entre 1 y 65535.")
 else:
     port = find_free_port(8765)
-handler = make_handler(html_bytes)
-server  = ThreadingHTTPServer(("0.0.0.0", port), handler)
+handler     = make_handler(html_bytes)
+_bind_host  = "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1"
+server      = ThreadingHTTPServer((_bind_host, port), handler)
 
 url = f"http://localhost:{port}/"
 print(f"  Servidor iniciado en {url}")
