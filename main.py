@@ -746,12 +746,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
   /* Mobile */
   @media (max-width: 640px) {
     body { height: auto; overflow-y: auto; min-height: 100dvh; }
-    #chart-container { height: 75vw; min-height: 380px; flex: none; }
+    #chart-container { height: auto; flex: none; overflow: visible; }
 
     #header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
     .logo-text .subtitle { display: none; }
     .adj-toggle-wrap { margin-left: auto; order: 2; }
-    .adj-toggle-lbl  { display: none; }
+    .adj-toggle-lbl  { font-size: 8px; letter-spacing: 0.03em; }
 
     /* Barra de filtros: fila 1 = presets de período, fila 2 = fechas + acción */
     #date-filter {
@@ -1142,12 +1142,21 @@ async function freshUpdate() {
 // Escala de color: discreteColor() — 7 pasos saturados (mismo esquema del diseño ref.)
 // Sombra inferior: gradiente SVG objectBoundingBox → transparent→rgba(0,0,0,0.3)
 //   replica el efecto ::before { linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.3)) }
+// En móvil (≤640px) se usa renderMobile(): sectores apilados verticalmente.
+// En escritorio se usa renderDesktop(): treemap 2D clásico.
 // ════════════════════════════════════════════════════════════════════════════════
 const svg       = d3.select("#treemap");
 const container = document.getElementById("chart-container");
 const tooltip   = document.getElementById("tooltip");
 
+function isMobile() { return window.innerWidth <= 640; }
+
 function render(data) {
+  if (isMobile()) { renderMobile(data); } else { renderDesktop(data); }
+}
+
+function renderDesktop(data) {
+  svg.style("height", null).attr("height", null);
   svg.selectAll("*").remove();
 
   const W = container.clientWidth;
@@ -1276,6 +1285,173 @@ function render(data) {
         .attr("font-size", fsTicker + "px").text(d.data.name)
         .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
     }
+  });
+
+  updateMovers(data);
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════════
+// RENDERIZADO MÓVIL — sectores apilados verticalmente, scroll nativo
+// Cada sector recibe altura proporcional a su market cap (mínimo 90px).
+// Dentro de cada sector se aplica d3.treemap() igual que en escritorio.
+// ════════════════════════════════════════════════════════════════════════════════
+function renderMobile(data) {
+  svg.selectAll("*").remove();
+
+  const W          = container.clientWidth || window.innerWidth;
+  const sectorGap  = 4;
+  const headerH    = 18;
+  const minSectorH = 90;
+
+  const totalValue = data.children.reduce((sum, s) =>
+    sum + s.children.reduce((a, t) => a + (t.value || 0), 0), 0);
+
+  // Altura proporcional al market cap de cada sector, con mínimo garantizado
+  const targetTotal = Math.max(data.children.length * 130, 1400);
+  const sectorHeights = data.children.map(s => {
+    const sv = s.children.reduce((a, t) => a + (t.value || 0), 0);
+    return Math.max(minSectorH, (sv / totalValue) * targetTotal);
+  });
+  const totalH = sectorHeights.reduce((sum, h) => sum + h, 0)
+               + (data.children.length + 1) * sectorGap;
+
+  svg.attr("viewBox", `0 0 ${W} ${totalH}`)
+     .attr("height", totalH)
+     .style("height", totalH + "px");
+
+  // Gradiente de sombra inferior (igual que en escritorio)
+  const defs = svg.append("defs");
+  const grad = defs.append("linearGradient")
+    .attr("id", "cell-shadow")
+    .attr("x1", "0").attr("y1", "0")
+    .attr("x2", "0").attr("y2", "1");
+  grad.append("stop").attr("offset", "0%")   .attr("stop-color", "#000").attr("stop-opacity", "0");
+  grad.append("stop").attr("offset", "40%")  .attr("stop-color", "#000").attr("stop-opacity", "0");
+  grad.append("stop").attr("offset", "100%") .attr("stop-color", "#000").attr("stop-opacity", "0.32");
+
+  let yOffset = sectorGap;
+
+  data.children.forEach((sector, si) => {
+    const sH = sectorHeights[si];
+    const sX = sectorGap;
+    const sW = W - sectorGap * 2;
+
+    // Fondo del sector
+    svg.append("rect")
+      .attr("x", sX).attr("y", yOffset)
+      .attr("width", sW).attr("height", sH)
+      .attr("fill", "#0c1628").attr("rx", 6);
+
+    // Etiqueta del sector
+    svg.append("text")
+      .attr("class", "industry-label")
+      .attr("x", sX + 8).attr("y", yOffset + 13)
+      .text(sector.name);
+
+    // Área interior para los tickers
+    const innerX = sX + 2;
+    const innerY = yOffset + headerH + 2;
+    const innerW = sW - 4;
+    const innerH = sH - headerH - 4;
+
+    // Treemap D3 para los tickers de este sector
+    const sectorRoot = d3.hierarchy({ name: sector.name, children: sector.children })
+      .sum(d => d.value || 0)
+      .sort((a, b) => b.value - a.value);
+
+    d3.treemap()
+      .tile(d3.treemapSquarify.ratio(1.2))
+      .size([innerW, innerH])
+      .paddingInner(2)
+      (sectorRoot);
+
+    // Grupo desplazado al origen del área interior del sector
+    const sectorGroup = svg.append("g")
+      .attr("transform", `translate(${innerX}, ${innerY})`);
+
+    const cells = sectorGroup.selectAll(".cell")
+      .data(sectorRoot.leaves())
+      .join("g")
+      .attr("class", "cell")
+      .style("cursor", "pointer");
+
+    // Fondo de cada celda coloreado por variación %
+    cells.append("rect")
+      .attr("class", "cell-fill")
+      .attr("x", d => d.x0 + 1).attr("y", d => d.y0 + 1)
+      .attr("width",  d => Math.max(0, d.x1 - d.x0 - 2))
+      .attr("height", d => Math.max(0, d.y1 - d.y0 - 2))
+      .attr("fill", d => discreteColor(d.data.pct))
+      .attr("rx", 5)
+      .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave)
+      .on("touchstart", onTouchStart);
+
+    // Sombra inferior (gradient overlay, sin eventos de puntero)
+    cells.append("rect")
+      .attr("x", d => d.x0 + 1).attr("y", d => d.y0 + 1)
+      .attr("width",  d => Math.max(0, d.x1 - d.x0 - 2))
+      .attr("height", d => Math.max(0, d.y1 - d.y0 - 2))
+      .attr("fill", "url(#cell-shadow)")
+      .attr("rx", 5)
+      .attr("pointer-events", "none");
+
+    // Etiquetas ancladas al fondo-izquierda de cada celda (mismo criterio que escritorio)
+    cells.each(function(d) {
+      const g  = d3.select(this);
+      const cw = d.x1 - d.x0;
+      const ch = d.y1 - d.y0;
+
+      if (cw < 28 || ch < 18) return;
+
+      const xl       = d.x0 + 10;
+      const fsTicker = Math.min(13, Math.max(7, cw / 5.5));
+      const fsPct    = Math.min(14, Math.max(7, cw / 5.5));
+      const fsName   = 9;
+      const pctSign  = d.data.pct >= 0 ? "+" : "";
+      const pctText  = `${pctSign}${d.data.pct.toFixed(2)}%`;
+
+      const pctY    = d.y1 - 10;
+      const nameY   = pctY - fsPct - 4;
+      const tickerY = nameY - fsName - 3;
+
+      if (ch >= 55 && tickerY > d.y0 + 4) {
+        const maxChars  = Math.max(0, Math.floor((cw - 20) / 5.5));
+        const fullName  = d.data.fullName || "";
+        const nameTrunc = fullName.length > maxChars
+          ? fullName.substring(0, Math.max(0, maxChars - 1)) + "…"
+          : fullName;
+        g.append("text").attr("class", "cell-ticker")
+          .attr("x", xl).attr("y", tickerY)
+          .attr("font-size", fsTicker + "px").text(d.data.name)
+          .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+        g.append("text").attr("class", "cell-name")
+          .attr("x", xl).attr("y", nameY)
+          .attr("font-size", fsName + "px").text(nameTrunc)
+          .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+        g.append("text").attr("class", "cell-pct")
+          .attr("x", xl).attr("y", pctY)
+          .attr("font-size", fsPct + "px").text(pctText)
+          .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+      } else if (ch >= 36) {
+        const ty = pctY - fsPct - 5;
+        g.append("text").attr("class", "cell-ticker")
+          .attr("x", xl).attr("y", ty > d.y0 + 4 ? ty : pctY - fsTicker - 3)
+          .attr("font-size", fsTicker + "px").text(d.data.name)
+          .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+        g.append("text").attr("class", "cell-pct")
+          .attr("x", xl).attr("y", pctY)
+          .attr("font-size", fsPct + "px").text(pctText)
+          .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+      } else {
+        g.append("text").attr("class", "cell-ticker")
+          .attr("x", xl).attr("y", pctY)
+          .attr("font-size", fsTicker + "px").text(d.data.name)
+          .on("mousemove", onMouseMove).on("mouseleave", onMouseLeave);
+      }
+    });
+
+    yOffset += sH + sectorGap;
   });
 
   updateMovers(data);
