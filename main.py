@@ -778,6 +778,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     #legend-right { margin-left: 0; width: 100%; }
   }
 </style>
+  <!-- Cloudflare Web Analytics -->
+  <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "1e000c43ec6c45cdb239a572900c9658"}'></script>
+  <!-- End Cloudflare Web Analytics -->
 </head>
 <body>
 
@@ -1652,10 +1655,10 @@ def make_handler(html_bytes: bytes):
                 self.send_header(
                     "Content-Security-Policy",
                     "default-src 'self'; "
-                    "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com 'unsafe-inline'; "
+                    "script-src 'self' https://d3js.org https://cdnjs.cloudflare.com https://static.cloudflareinsights.com 'unsafe-inline'; "
                     "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
                     "font-src https://fonts.gstatic.com; "
-                    "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; "
+                    "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cloudflareinsights.com; "
                     "img-src 'self' data:; "
                     "object-src 'none'; "
                     "frame-ancestors 'none';"
