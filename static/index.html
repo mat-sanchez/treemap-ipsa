@@ -35,10 +35,7 @@
 </div>
 
 <!-- ── Panel de filtro de fechas ── -->
-<!--
-  Las fechas se aplican automáticamente al cambiar (sin botón "Filtrar").
-  El botón "Actualizar" descarga 13 meses frescos desde Yahoo Finance.
--->
+<!-- Las fechas se aplican automáticamente al cambiar (sin botón "Filtrar"). -->
 <div id="date-filter">
   <!-- Presets de período rápido -->
   <div class="period-group" id="period-btns">
@@ -56,7 +53,6 @@
     <input type="date" id="date-start" class="date-chip" title="Fecha de inicio">
     <span class="filter-arrow">→</span>
     <input type="date" id="date-end" class="date-chip" title="Fecha de término">
-    <button id="btn-update" onclick="freshUpdate()">↓ Actualizar datos</button>
     <span id="filter-status"></span>
     <button id="btn-download" onclick="downloadPNG()" title="Descargar imagen PNG">⬇ PNG</button>
   </div>

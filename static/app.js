@@ -209,15 +209,13 @@ function applyFilter() {
 
 // ════════════════════════════════════════════════════════════════════════════════
 // ACTUALIZAR CON DATOS FRESCOS — descarga 13 meses nuevos desde Yahoo Finance
+// Llamado automáticamente al cargar la página; no hay botón manual.
 // ════════════════════════════════════════════════════════════════════════════════
 async function freshUpdate() {
   const dates = validateDates();
   if (!dates) return;
   const { startVal, endVal } = dates;
 
-  const btn = document.getElementById("btn-update");
-  btn.disabled    = true;
-  btn.textContent = "Descargando...";
   setStatus("loading", "⟳ Descargando...");
   showProgress();
 
@@ -242,15 +240,13 @@ async function freshUpdate() {
     }
 
     updateBadge(startVal, endVal);
-    setStatus("ok", `✓ ${countLeaves(currentData)} tickers · frescos`);
+    setStatus("ok", `✓ ${countLeaves(currentData)} tickers`);
     render(currentData);
 
   } catch (err) {
     setStatus("error", `⚠ ${err.message}`);
   } finally {
     hideProgress();
-    btn.disabled    = false;
-    btn.textContent = "↓ Actualizar datos";
   }
 }
 

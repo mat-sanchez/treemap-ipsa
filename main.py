@@ -9,8 +9,6 @@ Flujo completo:
   4. Levanta un servidor HTTP local (autodetecta un puerto libre desde el 8765).
   5. Abre el navegador apuntando a http://localhost:PORT/.
      - Cambiar las fechas en el panel de filtro → recalculo instantáneo (sin red).
-     - Clic en "Actualizar" → descarga 13 meses frescos desde Yahoo Finance y
-                              reemplaza el caché completo del navegador.
      - Clic en "⬇ PNG"     → exporta la vista actual (header + filtros + treemap
                              + leyenda) como imagen PNG de alta resolución.
   6. El servidor corre indefinidamente; se detiene con Ctrl+C en la consola.
