@@ -1577,6 +1577,28 @@ document.addEventListener("touchstart", e => {
   if (!e.target.closest(".cell")) { onMouseLeave(); _touchCell = null; }
 }, { passive: true });
 window.addEventListener("scroll", () => { onMouseLeave(); _touchCell = null; }, { passive: true });
+
+// Auto-refresh al entrar: muestra la data embebida de inmediato y luego descarga
+// datos frescos en segundo plano; al terminar actualiza los filtros a hoy (7D).
+(function autoRefreshOnLoad() {
+  const today       = new Date();
+  const todayStr    = formatDateISO(today);
+  const sevenAgo    = new Date(); sevenAgo.setDate(today.getDate() - 7);
+  const sevenAgoStr = formatDateISO(sevenAgo);
+
+  // Corregir el max de los date pickers al día real de hoy (puede diferir del deploy)
+  ["date-start", "date-end"].forEach(id => {
+    document.getElementById(id).max = todayStr;
+  });
+
+  // Precargar los pickers con el rango 7D relativo a hoy
+  document.getElementById("date-start").value = sevenAgoStr;
+  document.getElementById("date-end").value   = todayStr;
+  document.querySelectorAll(".period-btn").forEach(b => b.classList.remove("active"));
+  document.querySelector('.period-btn[data-days="7"]').classList.add("active");
+
+  freshUpdate();
+})();
 </script>
 </body>
 </html>
