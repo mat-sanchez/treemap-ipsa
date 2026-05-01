@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPSA Treemap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"
+        integrity="sha384-CjloA8y00+1SDAUkjs099PVfnY2KmDC2BZnws9kh8D/lX1s46w6EPhpXdqMfjK6i"
+        crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+        integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H"
+        crossorigin="anonymous"></script>
+  <!-- Cloudflare Web Analytics -->
+  <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "1e000c43ec6c45cdb239a572900c9658"}'></script>
+  <!-- End Cloudflare Web Analytics -->
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div id="header">
+  <div class="logo-text">
+    <h1>IPSA</h1>
+    <div class="subtitle">Bolsa de Santiago · Área = Market Cap</div>
+  </div>
+
+  <!-- Toggle nominal / ajustado por dividendos -->
+  <div class="adj-toggle-wrap" onclick="toggleAdjusted()" title="Cambiar entre precios nominales y ajustados por dividendos">
+    <span class="adj-toggle-lbl on" id="lbl-nominal">Nominal</span>
+    <div id="adj-toggle"><div class="toggle-knob"></div></div>
+    <span class="adj-toggle-lbl" id="lbl-adj">Ajustado por Dividendos</span>
+  </div>
+</div>
+
+<!-- ── Panel de filtro de fechas ── -->
+<!--
+  Las fechas se aplican automáticamente al cambiar (sin botón "Filtrar").
+  El botón "Actualizar" descarga 13 meses frescos desde Yahoo Finance.
+-->
+<div id="date-filter">
+  <!-- Presets de período rápido -->
+  <div class="period-group" id="period-btns">
+    <button class="period-btn" data-days="0">HOY</button>
+    <button class="period-btn active" data-days="7">7D</button>
+    <button class="period-btn" data-days="30">1M</button>
+    <button class="period-btn" data-days="90">3M</button>
+    <button class="period-btn" data-days="180">6M</button>
+    <button class="period-btn" data-days="365">1A</button>
+  </div>
+
+  <div class="filter-divider"></div>
+
+  <div class="date-row">
+    <input type="date" id="date-start" class="date-chip" title="Fecha de inicio">
+    <span class="filter-arrow">→</span>
+    <input type="date" id="date-end" class="date-chip" title="Fecha de término">
+    <button id="btn-update" onclick="freshUpdate()">↓ Actualizar datos</button>
+    <span id="filter-status"></span>
+    <button id="btn-download" onclick="downloadPNG()" title="Descargar imagen PNG">⬇ PNG</button>
+  </div>
+</div>
+
+<!-- ── Barra de progreso (visible solo durante "Actualizar") ── -->
+<div id="progress-bar-wrap">
+  <div id="progress-bar-fill"></div>
+</div>
+
+<!-- ── Treemap SVG ── -->
+<div id="chart-container">
+  <svg id="treemap"></svg>
+</div>
+
+<div id="tooltip"></div>
+
+<!-- ── Leyenda + movers bar ── -->
+<div id="legend">
+  <span id="legend-label">Variación %</span>
+  <div id="legend-wrap">
+    <div id="legend-blocks">
+      <div class="lg-block" style="background:#ff4d6d"></div>
+      <div class="lg-block" style="background:#d93050"></div>
+      <div class="lg-block" style="background:#a02040"></div>
+      <div class="lg-block" style="background:#2a3548"></div>
+      <div class="lg-block" style="background:#007a5a"></div>
+      <div class="lg-block" style="background:#00a87e"></div>
+      <div class="lg-block" style="background:#00c897"></div>
+    </div>
+    <div id="legend-ticks">
+      <span>-4%</span><span>-2%</span><span>0</span><span>+2%</span><span>+4%</span>
+    </div>
+  </div>
+
+  <div id="movers-bar">
+    <span id="movers-up"></span>
+    <span id="movers-down"></span>
+  </div>
+
+  <span id="legend-right">
+    <a id="linkedin-link" href="https://www.linkedin.com/in/mat%C3%ADas-alejandro-s%C3%A1nchez-ruiz/" target="_blank" rel="noopener">
+      <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1-2.063-2.065 2.064 2.064 0 1 1 2.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+      </svg>
+      Matías Sánchez Ruiz
+    </a>
+  </span>
+</div>
+
+<!--
+  Payload de inicialización generado por Python al arrancar el servidor.
+  type="application/json" → el navegador no lo ejecuta; no requiere 'unsafe-inline' en CSP.
+  app.js lo lee con: JSON.parse(document.getElementById("init-data").textContent)
+  Contiene: tree (árbol D3), defaultStart, defaultEnd, dateMin, dateMax.
+-->
+<script type="application/json" id="init-data">INIT_PLACEHOLDER</script>
+<script src="/static/app.js"></script>
+</body>
+</html>
