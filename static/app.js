@@ -69,6 +69,9 @@ document.getElementById("period-btns").addEventListener("click", e => {
   });
 });
 
+document.getElementById("adj-toggle-wrap").addEventListener("click", toggleAdjusted);
+document.getElementById("btn-download").addEventListener("click", downloadPNG);
+
 
 // ════════════════════════════════════════════════════════════════════════════════
 // MOVERS BAR — top 3 gainers y losers del período actual

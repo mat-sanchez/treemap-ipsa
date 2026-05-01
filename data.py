@@ -193,7 +193,7 @@ def refresh_and_build_json() -> str:
     Descarga 13 meses frescos de precios desde Yahoo Finance y retorna el árbol
     D3 completo serializado como string JSON.
 
-    Llamada desde el endpoint HTTP GET /refresh cuando el usuario pulsa "Actualizar".
+    Llamada desde el endpoint HTTP GET /refresh al cargarse la página (auto-refresh).
     Usa el mismo rango que la descarga inicial (400 días calendario ≈ 13 meses)
     para que el caché del navegador quede completamente actualizado y el filtro
     local siga funcionando sobre datos recientes.

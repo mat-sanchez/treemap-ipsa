@@ -27,7 +27,7 @@
   </div>
 
   <!-- Toggle nominal / ajustado por dividendos -->
-  <div class="adj-toggle-wrap" onclick="toggleAdjusted()" title="Cambiar entre precios nominales y ajustados por dividendos">
+  <div class="adj-toggle-wrap" id="adj-toggle-wrap" title="Cambiar entre precios nominales y ajustados por dividendos">
     <span class="adj-toggle-lbl on" id="lbl-nominal">Nominal</span>
     <div id="adj-toggle"><div class="toggle-knob"></div></div>
     <span class="adj-toggle-lbl" id="lbl-adj">Ajustado por Dividendos</span>
@@ -54,7 +54,7 @@
     <span class="filter-arrow">→</span>
     <input type="date" id="date-end" class="date-chip" title="Fecha de término">
     <span id="filter-status"></span>
-    <button id="btn-download" onclick="downloadPNG()" title="Descargar imagen PNG">⬇ PNG</button>
+    <button id="btn-download" title="Descargar imagen PNG">⬇ PNG</button>
   </div>
 </div>
 
